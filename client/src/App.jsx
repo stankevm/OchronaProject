@@ -150,7 +150,8 @@ function App() {
       const data = await response.json();
       
       if (response.ok) {
-        setUser(data);
+        setUser(data.user);
+        setToken(data.token);
         setShowSignup(false);
         setSignupData({ email: '', username: '', password: '' });
       } else {

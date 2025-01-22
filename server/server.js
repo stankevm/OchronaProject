@@ -141,7 +141,7 @@ app.post("/api/users", async (req, res) => {
 
         const newUser = await prisma.user.create({
             data: {
-                email: email.toLowerCase().trim(), // Normalize email
+                email: email.toLowerCase().trim(),
                 username: username.trim(),
                 password: hashedPassword,
             },
@@ -151,7 +151,12 @@ app.post("/api/users", async (req, res) => {
                 email: true,
             },
         });
-        res.status(201).json(newUser);
+
+        // Generate token after successful signup
+        const token = jwt.sign({ userId: newUser.id }, JWT_SECRET, { expiresIn: '1h' });
+        
+        // Return both user data and token
+        res.status(201).json({ user: newUser, token });
     } catch (error) {
         if (error.code === 'P2002') {
             res.status(400).json({ error: 'Username or email already exists' });
