@@ -33,6 +33,41 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+// Add validation helpers at the top
+const validateEmail = (email) => {
+  if (!email || typeof email !== 'string') return 'Email is required';
+  if (email.length > 255) return 'Email is too long';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Invalid email format';
+  return null;
+};
+
+const validateUsername = (username) => {
+  if (!username || typeof username !== 'string') return 'Username is required';
+  if (username.length < 3) return 'Username must be at least 3 characters';
+  if (username.length > 30) return 'Username must be less than 30 characters';
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) return 'Username can only contain letters, numbers, underscores, and hyphens';
+  return null;
+};
+
+const validatePassword = (password) => {
+  if (!password || typeof password !== 'string') return 'Password is required';
+  if (password.length < 6) return 'Password must be at least 6 characters';
+  if (password.length > 100) return 'Password is too long';
+  if (!/\d/.test(password)) return 'Password must contain at least one number';
+  if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
+  return null;
+};
+
+const validateTweetContent = (content) => {
+  if (!content || typeof content !== 'string') return 'Tweet content is required';
+  if (content.trim() === '') return 'Tweet cannot be empty';
+  if (content.length > 280) return 'Tweet must be less than 280 characters';
+  // Check for potentially harmful content
+  if (/<[^>]*>/.test(content)) return 'HTML tags are not allowed';
+  return null;
+};
+
 // Get all tweets with author information
 app.get("/api/tweets", authenticateToken, async (req, res) => {
     try {
@@ -60,15 +95,16 @@ app.get("/api/tweets", authenticateToken, async (req, res) => {
 app.post("/api/tweets", authenticateToken, async (req, res) => {
     const { content } = req.body;
     
-    if (!content || content.trim() === '') {
-        return res.status(400).json({ error: 'Tweet content is required' });
+    const contentError = validateTweetContent(content);
+    if (contentError) {
+        return res.status(400).json({ error: contentError });
     }
 
     try {
         const newTweet = await prisma.tweet.create({
             data: {
-                content,
-                authorId: req.userId, // Use the userId from the token
+                content: content.trim(), // Sanitize by trimming
+                authorId: req.userId,
             },
             include: {
                 author: {
@@ -89,19 +125,24 @@ app.post("/api/tweets", authenticateToken, async (req, res) => {
 app.post("/api/users", async (req, res) => {
     const { email, username, password } = req.body;
 
-    if (!email || !username || !password) {
-        return res.status(400).json({ error: 'All fields are required' });
-    }
+    // Validate all fields
+    const emailError = validateEmail(email);
+    if (emailError) return res.status(400).json({ error: emailError });
+
+    const usernameError = validateUsername(username);
+    if (usernameError) return res.status(400).json({ error: usernameError });
+
+    const passwordError = validatePassword(password);
+    if (passwordError) return res.status(400).json({ error: passwordError });
 
     try {
         const salt = await bcrypt.genSalt(10);
-        // Hash the password with the generated salt
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const newUser = await prisma.user.create({
             data: {
-                email,
-                username,
+                email: email.toLowerCase().trim(), // Normalize email
+                username: username.trim(),
                 password: hashedPassword,
             },
             select: {
@@ -125,13 +166,16 @@ app.post("/api/users", async (req, res) => {
 app.post("/api/login", async (req, res) => {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
+    const emailError = validateEmail(email);
+    if (emailError) return res.status(400).json({ error: emailError });
+
+    if (!password || typeof password !== 'string') {
+        return res.status(400).json({ error: 'Password is required' });
     }
 
     try {
         const user = await prisma.user.findUnique({
-            where: { email },
+            where: { email: email.toLowerCase().trim() }, // Normalize email
         });
 
         if (!user) {
