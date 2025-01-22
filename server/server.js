@@ -3,6 +3,7 @@ const app = express();
 const cors = require("cors");
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const prisma = new PrismaClient();
 const corsOptions = {
@@ -12,8 +13,28 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Middleware to verify JWT token
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.userId; // Add userId to request object
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
 // Get all tweets with author information
-app.get("/api/tweets", async (req, res) => {
+app.get("/api/tweets", authenticateToken, async (req, res) => {
     try {
         const tweets = await prisma.tweet.findMany({
             include: {
@@ -24,7 +45,6 @@ app.get("/api/tweets", async (req, res) => {
                     },
                 },
             },
-
             orderBy: {
                 id: 'desc',
             },
@@ -37,8 +57,8 @@ app.get("/api/tweets", async (req, res) => {
 });
 
 // Create a new tweet
-app.post("/api/tweets", async (req, res) => {
-    const { content, userId } = req.body;
+app.post("/api/tweets", authenticateToken, async (req, res) => {
+    const { content } = req.body;
     
     if (!content || content.trim() === '') {
         return res.status(400).json({ error: 'Tweet content is required' });
@@ -48,7 +68,7 @@ app.post("/api/tweets", async (req, res) => {
         const newTweet = await prisma.tweet.create({
             data: {
                 content,
-                authorId: userId || 1, // For now, default to user 1 if no userId provided
+                authorId: req.userId, // Use the userId from the token
             },
             include: {
                 author: {
@@ -74,8 +94,9 @@ app.post("/api/users", async (req, res) => {
     }
 
     try {
-        // Just hash once with a salt - double hashing isn't necessary
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const salt = await bcrypt.genSalt(10);
+        // Hash the password with the generated salt
+        const hashedPassword = await bcrypt.hash(password, salt);
 
         const newUser = await prisma.user.create({
             data: {
@@ -124,9 +145,11 @@ app.post("/api/login", async (req, res) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
+        const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '1h' });
+
         // Send user data without password
         const { password: _, ...userData } = user;
-        res.json(userData);
+        res.json({ user: userData, token });
     } catch (error) {
         console.error('Error during login:', error);
         res.status(500).json({ error: 'Login failed' });
@@ -134,7 +157,7 @@ app.post("/api/login", async (req, res) => {
 });
 
 // Get user by id
-app.get("/api/users/:id", async (req, res) => {
+app.get("/api/users/:id", authenticateToken, async (req, res) => {
     const { id } = req.params;
     
     try {
