@@ -8,21 +8,25 @@ datasource db {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  email         String   @unique
-  username      String   @unique
-  password      String
+  id              Int      @id @default(autoincrement())
+  email           String   @unique
+  username        String   @unique
+  password        String
   twoFactorSecret String?  
   twoFactorEnabled Boolean @default(false)
-  resetRequested DateTime? 
+  resetRequested  DateTime?
   loginAttempts   Int      @default(0)  // Track failed attempts
   lastAttempt     DateTime? // Track time of last attempt
-  tweets        Tweet[]
+  publicKey       String?
+  encryptedPrivateKey String?
+  tweets          Tweet[]
 }
 
 model Tweet {
   id        Int      @id @default(autoincrement())
   content   String
+  signature String?
+  verified  Boolean  @default(false)
   authorId  Int
   author    User     @relation(fields: [authorId], references: [id])
 }

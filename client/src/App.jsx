@@ -129,6 +129,7 @@ function App() {
   const [resetToken, setResetToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [resetRequires2FA, setResetRequires2FA] = useState(false);
+  const [tweetPassword, setTweetPassword] = useState('');
 
   const inputRef = useRef(null);
 
@@ -143,6 +144,11 @@ function App() {
       inputRef.current.focus();
     }
   }, []);
+
+  useEffect(() => {
+    setTweetPassword('');
+    setNewTweet('');
+  }, [user?.id]);
 
   // Check for saved token on mount
   useEffect(() => {
@@ -182,9 +188,6 @@ function App() {
       setErrors(prev => ({ ...prev, tweet: contentError }));
       return;
     }
-    setErrors(prev => ({ ...prev, tweet: null }));
-
-    if (!newTweet.trim() || !token) return;
 
     try {
       const response = await fetch('http://localhost:8080/api/tweets', {
@@ -195,16 +198,14 @@ function App() {
         },
         body: JSON.stringify({ 
           content: newTweet,
+          password: tweetPassword 
         }),
       });
       
       if (response.ok) {
         setNewTweet('');
+        setTweetPassword('');
         fetchTweets();
-      } else if (response.status === 401) {
-        setUser(null);
-        setToken(null);
-        setTweets([]);
       }
     } catch (error) {
       console.error('Error creating tweet:', error);
@@ -677,6 +678,13 @@ function App() {
               content={newTweet} 
               onChange={setNewTweet}
             />
+            <input
+              type="password"
+              placeholder="Enter your password to sign tweet"
+              value={tweetPassword}
+              onChange={(e) => setTweetPassword(e.target.value)}
+              required
+            />
             {errors.tweet && <div className="error-message">{errors.tweet}</div>}
             <button type="submit">Tweet</button>
           </form>
@@ -686,6 +694,9 @@ function App() {
               <div key={tweet.id} className="tweet">
                 <div className="tweet-header">
                   <span className="username">@{tweet.author.username}</span>
+                  {tweet.verified && (
+                    <span className="verified-badge">✓ Verified</span>
+                  )}
                 </div>
                 <div className="content">
                   <ReactMarkdown>{tweet.content}</ReactMarkdown>

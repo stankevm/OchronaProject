@@ -6,6 +6,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const { generateKeyPair, encryptPrivateKey, decryptPrivateKey, signData, verifySignature } = require('./utils/crypto');
 
 const prisma = new PrismaClient();
 const corsOptions = {
@@ -95,7 +96,7 @@ app.get("/api/tweets", authenticateToken, async (req, res) => {
 
 // Create a new tweet
 app.post("/api/tweets", authenticateToken, async (req, res) => {
-    const { content } = req.body;
+    const { content, password } = req.body;
     
     const contentError = validateTweetContent(content);
     if (contentError) {
@@ -103,9 +104,33 @@ app.post("/api/tweets", authenticateToken, async (req, res) => {
     }
 
     try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId },
+            select: {
+                password: true,
+                encryptedPrivateKey: true,
+                publicKey: true
+            }
+        });
+
+        // Verify password
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Invalid password' });
+        }
+
+        // Decrypt private key and sign content
+        const privateKey = decryptPrivateKey(user.encryptedPrivateKey, password);
+        const signature = signData(content, privateKey);
+
+        // Verify signature before saving
+        const verified = verifySignature(content, signature, user.publicKey);
+
         const newTweet = await prisma.tweet.create({
             data: {
-                content: content.trim(), // Sanitize by trimming
+                content: content.trim(),
+                signature,
+                verified,
                 authorId: req.userId,
             },
             include: {
@@ -141,11 +166,17 @@ app.post("/api/users", async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
+        // Generate key pair
+        const { publicKey, privateKey } = generateKeyPair();
+        const encryptedPrivateKey = encryptPrivateKey(privateKey, password);
+
         const newUser = await prisma.user.create({
             data: {
                 email: email.toLowerCase().trim(),
                 username: username.trim(),
                 password: hashedPassword,
+                publicKey,
+                encryptedPrivateKey
             },
             select: {
                 id: true,
@@ -154,10 +185,7 @@ app.post("/api/users", async (req, res) => {
             },
         });
 
-        // Generate token after successful signup
         const token = jwt.sign({ userId: newUser.id }, JWT_SECRET, { expiresIn: '1h' });
-        
-        // Return both user data and token
         res.status(201).json({ user: newUser, token });
     } catch (error) {
         if (error.code === 'P2002') {
