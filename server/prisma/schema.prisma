@@ -8,11 +8,16 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  username  String   @unique
-  password  String
-  tweets    Tweet[]
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  username      String   @unique
+  password      String
+  twoFactorSecret String?  
+  twoFactorEnabled Boolean @default(false)
+  resetRequested DateTime? 
+  loginAttempts   Int      @default(0)  // Track failed attempts
+  lastAttempt     DateTime? // Track time of last attempt
+  tweets        Tweet[]
 }
 
 model Tweet {

@@ -113,6 +113,7 @@
 
 .tweet-form {
   margin-bottom: 20px;
+  text-align: left;
 }
 
 .tweet-form textarea {
@@ -200,4 +201,153 @@
   margin-bottom: 10px;
   border: 1px solid #ccc;
   border-radius: 4px;
+}
+
+.setup-2fa-button {
+  margin: 20px 0;
+  padding: 10px 20px;
+  background-color: #1da1f2;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+.setup-2fa-button:hover {
+  background-color: #1991db;
+}
+
+.two-factor-setup {
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background-color: white;
+}
+
+.two-factor-setup h2 {
+  margin-bottom: 15px;
+}
+
+.two-factor-setup img {
+  display: block;
+  margin: 20px auto;
+  max-width: 200px;
+}
+
+.two-factor-setup form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.two-factor-setup input {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.two-factor-setup button {
+  padding: 10px;
+  background-color: #1da1f2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.two-factor-setup button:hover {
+  background-color: #1991db;
+}
+
+.tweet .content {
+  text-align: left;
+}
+
+.tweet .content h1 {
+  font-size: 1.5em;
+  margin: 0.5em 0;
+}
+
+.tweet .content h2 {
+  font-size: 1.3em;
+  margin: 0.5em 0;
+}
+
+.tweet .content p {
+  margin: 0.5em 0;
+}
+
+.tweet .content code {
+  background-color: #f0f0f0;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.tweet .content blockquote {
+  border-left: 3px solid #1da1f2;
+  margin: 0.5em 0;
+  padding-left: 1em;
+  color: #666;
+}
+
+.tweet .content ul,
+.tweet .content ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.password-input-container {
+  position: relative;
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+.password-strength {
+  margin-top: 5px;
+  height: 4px;
+  background-color: #eee;
+  border-radius: 2px;
+  position: relative;
+}
+
+.password-strength .strength-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.password-strength.very-weak .strength-bar {
+  background-color: #ff4444;
+  width: 20%;
+}
+
+.password-strength.weak .strength-bar {
+  background-color: #ffa700;
+  width: 40%;
+}
+
+.password-strength.moderate .strength-bar {
+  background-color: #ffdb4a;
+  width: 60%;
+}
+
+.password-strength.strong .strength-bar {
+  background-color: #99cc00;
+  width: 80%;
+}
+
+.password-strength.very-strong .strength-bar {
+  background-color: #00cc44;
+  width: 100%;
+}
+
+.password-strength span {
+  position: absolute;
+  right: 0;
+  top: 6px;
+  font-size: 12px;
+  color: #666;
 }

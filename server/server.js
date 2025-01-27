@@ -4,6 +4,8 @@ const cors = require("cors");
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 
 const prisma = new PrismaClient();
 const corsOptions = {
@@ -167,9 +169,86 @@ app.post("/api/users", async (req, res) => {
     }
 });
 
-// Fix login endpoint as well
+// Generate 2FA secret and QR code
+app.post("/api/2fa/generate", authenticateToken, async (req, res) => {
+    try {
+        // Get user email for the QR code label
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId },
+            select: { email: true }
+        });
+
+        console.log(user.email);
+
+        const secret = speakeasy.generateSecret({
+            name: `MiniTwitter:${user.email}` // Now we have the email
+        });
+
+        // Store the secret temporarily
+        await prisma.user.update({
+            where: { id: req.userId },
+            data: { 
+                twoFactorSecret: secret.base32,
+                twoFactorEnabled: false
+            }
+        });
+
+        // Generate QR code
+        const qrCode = await QRCode.toDataURL(secret.otpauth_url);
+
+        res.json({
+            secret: secret.base32,
+            qrCode
+        });
+    } catch (error) {
+        console.error('Error generating 2FA:', error);
+        res.status(500).json({ error: 'Failed to generate 2FA' });
+    }
+});
+
+// Verify and enable 2FA
+app.post("/api/2fa/verify", authenticateToken, async (req, res) => {
+    const { token } = req.body;
+
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId }
+        });
+
+        console.log(user.twoFactorSecret);
+
+        const verified = speakeasy.totp.verify({
+            secret: user.twoFactorSecret,
+            encoding: 'base32',
+            token
+        });
+
+        console.log(verified);
+
+        if (verified) {
+            await prisma.user.update({
+                where: { id: req.userId },
+                data: { twoFactorEnabled: true }
+            });
+            res.json({ success: true });
+        } else {
+            res.status(400).json({ error: 'Invalid token' });
+        }
+    } catch (error) {
+        console.error('Error verifying 2FA:', error);
+        res.status(500).json({ error: 'Failed to verify 2FA' });
+    }
+});
+
+// Add helper function for random delay
+const getRandomDelay = () => {
+  return Math.floor(Math.random() * 1000) + 500; // Random delay between 500-1500ms
+};
+
+// Modify login endpoint to handle attempts
 app.post("/api/login", async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, totpToken } = req.body;
+    console.log('Login attempt:', { email, hasPassword: !!password, totpToken });
 
     const emailError = validateEmail(email);
     if (emailError) return res.status(400).json({ error: emailError });
@@ -180,24 +259,96 @@ app.post("/api/login", async (req, res) => {
 
     try {
         const user = await prisma.user.findUnique({
-            where: { email: email.toLowerCase().trim() }, // Normalize email
+            where: { email: email.toLowerCase().trim() }
         });
 
         if (!user) {
+            // Add random delay even for non-existent users
+            await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Compare the password directly with bcrypt
-        const isPasswordValid = await bcrypt.compare(password, user.password);
+        // Check if user is locked out
+        if (user.loginAttempts >= 10) {
+            const lockoutTime = 15 * 60 * 1000; // 15 minutes
+            if (user.lastAttempt && Date.now() - user.lastAttempt.getTime() < lockoutTime) {
+                const remainingTime = Math.ceil((lockoutTime - (Date.now() - user.lastAttempt.getTime())) / 60000);
+                return res.status(429).json({ 
+                    error: `Too many failed attempts. Please try again in ${remainingTime} minutes.` 
+                });
+            } else {
+                // Reset attempts after lockout period
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { 
+                        loginAttempts: 0,
+                        lastAttempt: null
+                    }
+                });
+            }
+        }
 
-        if (!isPasswordValid) {
+        // Add random delay before password check
+        await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
+
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (!validPassword) {
+            // Increment failed attempts
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { 
+                    loginAttempts: {
+                        increment: 1
+                    },
+                    lastAttempt: new Date()
+                }
+            });
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
+        // Check 2FA if enabled
+        if (user.twoFactorEnabled) {
+            if (!totpToken) {
+                return res.status(403).json({ 
+                    requires2FA: true,
+                    message: 'Please provide 2FA token' 
+                });
+            }
+
+            const verified = speakeasy.totp.verify({
+                secret: user.twoFactorSecret,
+                encoding: 'base32',
+                token: totpToken,
+                window: 1
+            });
+
+            if (!verified) {
+                // Increment failed attempts for invalid 2FA too
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { 
+                        loginAttempts: {
+                            increment: 1
+                        },
+                        lastAttempt: new Date()
+                    }
+                });
+                return res.status(401).json({ error: 'Invalid 2FA token' });
+            }
+        }
+
+        // Reset attempts on successful login
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { 
+                loginAttempts: 0,
+                lastAttempt: null
+            }
+        });
+
+        // Generate JWT and send response
         const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '1h' });
-
-        // Send user data without password
-        const { password: _, ...userData } = user;
+        const { password: _, twoFactorSecret: __, ...userData } = user;
         res.json({ user: userData, token });
     } catch (error) {
         console.error('Error during login:', error);
@@ -230,6 +381,101 @@ app.get("/api/users/:id", authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Error fetching user:', error);
         res.status(500).json({ error: 'Failed to fetch user' });
+    }
+});
+
+// Add endpoint to verify token and return user data
+app.get("/api/verify-token", authenticateToken, async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                twoFactorEnabled: true
+            }
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json(user);
+    } catch (error) {
+        console.error('Error verifying token:', error);
+        res.status(500).json({ error: 'Failed to verify token' });
+    }
+});
+
+// Initiate password reset
+app.post("/api/reset-password/request", async (req, res) => {
+    const { email } = req.body;
+    
+    try {
+        const user = await prisma.user.findUnique({
+            where: { email: email.toLowerCase().trim() }
+        });
+
+        if (!user || !user.twoFactorEnabled) {
+            // Don't reveal if user exists or has 2FA
+            return res.json({ message: 'the account didnt have 2FA enabled, you will not be able to reset the password.' });
+        }
+
+        // Mark that user requested reset
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { resetRequested: new Date() }
+        });
+
+        res.json({ requires2FA: true });
+    } catch (error) {
+        console.error('Error requesting password reset:', error);
+        res.status(500).json({ error: 'Failed to process reset request' });
+    }
+});
+
+// Verify 2FA and reset password
+app.post("/api/reset-password/verify", async (req, res) => {
+    const { email, totpToken, newPassword } = req.body;
+
+    try {
+        const user = await prisma.user.findUnique({
+            where: { email: email.toLowerCase().trim() }
+        });
+
+        if (!user || !user.resetRequested) {
+            return res.status(400).json({ error: 'Invalid reset request' });
+        }
+
+        // Verify 2FA token
+        const verified = speakeasy.totp.verify({
+            secret: user.twoFactorSecret,
+            encoding: 'base32',
+            token: totpToken,
+            window: 1
+        });
+
+        if (!verified) {
+            return res.status(401).json({ error: 'Invalid 2FA token' });
+        }
+
+        // Reset password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { 
+                password: hashedPassword,
+                resetRequested: null
+            }
+        });
+
+        res.json({ message: 'Password reset successful' });
+    } catch (error) {
+        console.error('Error resetting password:', error);
+        res.status(500).json({ error: 'Failed to reset password' });
     }
 });
 
