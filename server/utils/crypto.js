@@ -15,27 +15,27 @@ const generateKeyPair = () => {
 };
 
 const encryptPrivateKey = (privateKey, password) => {
-  // Generate a random 16 bytes IV
+  // generujemy losowy 16-bitowy iv
   const iv = crypto.randomBytes(16);
-  // Create key from password
+  // tworzymy klucz z hasła
   const key = crypto.scryptSync(password, 'salt', 32);
-  // Create cipher
+  // tworzymy szyfr
   const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
   
   let encrypted = cipher.update(privateKey, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   
-  // Return both the IV and encrypted data
+  // zwracamy iv i zaszyfrowane dane
   return iv.toString('hex') + ':' + encrypted;
 };
 
 const decryptPrivateKey = (encryptedData, password) => {
-  // Split IV and encrypted data
+  // dzielimy iv i zaszyfrowane dane
   const [ivHex, encryptedKey] = encryptedData.split(':');
   const iv = Buffer.from(ivHex, 'hex');
-  // Create key from password
+  // tworzymy klucz z hasła
   const key = crypto.scryptSync(password, 'salt', 32);
-  // Create decipher
+  // tworzymy deszyfr
   const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
   
   let decrypted = decipher.update(encryptedKey, 'hex', 'utf8');

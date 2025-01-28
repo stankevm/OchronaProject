@@ -2,23 +2,23 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
+# kopiujemy package.json
 COPY package*.json ./
 
-# Install dependencies
+# instalujemy zależności
 RUN npm install
 
-# Copy prisma schema
+# kopiujemy prisma schema
 COPY prisma ./prisma/
 
-# Generate Prisma client
+# generujemy prisma client
 RUN npx prisma generate
 
-# Copy rest of the application
+# kopiujemy resztę aplikacji
 COPY . .
 
-# Expose port
+# eksponujemy port
 EXPOSE 8080
 
-# Wait for database then start application
+# czekamy na bazę danych a potem uruchamiamy aplikację
 CMD ["sh", "-c", "npx prisma migrate deploy && npm start"] 

@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown'
 
 const turndown = new TurndownService()
 
-// Add validation functions at the top (same as server-side ones)
+// takie same funkcje sprawdzające dane jak na serwerze
 const validateEmail = (email) => {
   if (!email) return 'Email is required';
   if (email.length > 255) return 'Email is too long';
@@ -27,11 +27,11 @@ const calculatePasswordEntropy = (password) => {
   let charset = 0;
   // Check for different character types
   if (/[a-z]/.test(password)) charset += 26;  // lowercase letters
-  if (/[A-Z]/.test(password)) charset += 26;  // uppercase letters
+  if (/[A-Z]/.test(password)) charset += 26;  // Duże litery
   if (/[0-9]/.test(password)) charset += 10;  // numbers
   if (/[^a-zA-Z0-9]/.test(password)) charset += 33;  // special characters
 
-  // Calculate entropy: log2(charset size ^ password length)
+  // entropy: log2(charset size ^ password length)
   const entropy = Math.log2(Math.pow(charset, password.length));
   return entropy;
 };
@@ -58,7 +58,7 @@ const validateTweetContent = (content) => {
   return null;
 };
 
-// Move TwoFactorSetup outside of App component
+
 const TwoFactorSetup = ({ 
   twoFactorQR, 
   twoFactorToken, 
@@ -150,7 +150,7 @@ function App() {
     setNewTweet('');
   }, [user?.id]);
 
-  // Check for saved token on mount
+  // sprawdzamy i ustawiamy token
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     if (savedToken) {
@@ -284,7 +284,7 @@ function App() {
     }
   };
 
-  // Move verifyTwoFactor outside of render
+
   const handleVerifyTwoFactor = async (e) => {
     e.preventDefault();
     try {
@@ -332,7 +332,7 @@ function App() {
         email: loginData.email,
         password: loginData.password
       };
-
+      
       console.log('Sending login request with:', { 
         ...loginPayload,
         hasPassword: !!loginPayload.password
@@ -375,7 +375,7 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token'); // Remove token
+    localStorage.removeItem('token'); // usuwamy token
     setUser(null);
     setToken(null);
     setTweets([]);
@@ -399,8 +399,7 @@ function App() {
     
     setPasswordStrength({ entropy, message });
   };
-
-  // Add function to verify token and get user data
+  // sprawdzamy i ustawiamy token
   const verifyAndSetToken = async (savedToken) => {
     try {
       const response = await fetch('http://localhost:8080/api/verify-token', {

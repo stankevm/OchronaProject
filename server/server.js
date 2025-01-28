@@ -7,6 +7,17 @@ const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const { generateKeyPair, encryptPrivateKey, decryptPrivateKey, signData, verifySignature } = require('./utils/crypto');
+const { 
+  validateEmail, 
+  validateUsername, 
+  validatePassword, 
+  validateTweetContent 
+} = require('./utils/validation');
+const { 
+    generateTwoFactorSecret, 
+    verifyTwoFactorToken, 
+    verifyTwoFactorLogin 
+} = require('./utils/twoFactor');
 
 const prisma = new PrismaClient();
 const corsOptions = {
@@ -18,7 +29,7 @@ app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware to verify JWT token
+// middleware do sprawdzania JWT tokenu
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
@@ -29,49 +40,14 @@ const authenticateToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId; // Add userId to request object
+    req.userId = decoded.userId; // Dodajemy userId do request object
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
 
-// Add validation helpers at the top
-const validateEmail = (email) => {
-  if (!email || typeof email !== 'string') return 'Email is required';
-  if (email.length > 255) return 'Email is too long';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Invalid email format';
-  return null;
-};
-
-const validateUsername = (username) => {
-  if (!username || typeof username !== 'string') return 'Username is required';
-  if (username.length < 3) return 'Username must be at least 3 characters';
-  if (username.length > 30) return 'Username must be less than 30 characters';
-  if (!/^[a-zA-Z0-9_-]+$/.test(username)) return 'Username can only contain letters, numbers, underscores, and hyphens';
-  return null;
-};
-
-const validatePassword = (password) => {
-  if (!password || typeof password !== 'string') return 'Password is required';
-  if (password.length < 6) return 'Password must be at least 6 characters';
-  if (password.length > 100) return 'Password is too long';
-  if (!/\d/.test(password)) return 'Password must contain at least one number';
-  if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter';
-  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
-  return null;
-};
-
-const validateTweetContent = (content) => {
-  if (!content || typeof content !== 'string') return 'Tweet content is required';
-  if (content.trim() === '') return 'Tweet cannot be empty';
-  if (content.length > 280) return 'Tweet must be less than 280 characters';
-  // Check for potentially harmful content
-  if (/<[^>]*>/.test(content)) return 'HTML tags are not allowed';
-  return null;
-};
-
-// Get all tweets with author information
+// pobieramy wszystkie tweety z informacja o autorze
 app.get("/api/tweets", authenticateToken, async (req, res) => {
     try {
         const tweets = await prisma.tweet.findMany({
@@ -94,7 +70,7 @@ app.get("/api/tweets", authenticateToken, async (req, res) => {
     }
 });
 
-// Create a new tweet
+// Tworzymy nowy tweet
 app.post("/api/tweets", authenticateToken, async (req, res) => {
     const { content, password } = req.body;
     
@@ -113,17 +89,17 @@ app.post("/api/tweets", authenticateToken, async (req, res) => {
             }
         });
 
-        // Verify password
+        // Sprawdzamy password
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid password' });
         }
 
-        // Decrypt private key and sign content
+        // Deszyfrujemy private key i tworzymy podpis
         const privateKey = decryptPrivateKey(user.encryptedPrivateKey, password);
         const signature = signData(content, privateKey);
 
-        // Verify signature before saving
+        // Sprawdzamy podpis przed zapisaniem
         const verified = verifySignature(content, signature, user.publicKey);
 
         const newTweet = await prisma.tweet.create({
@@ -148,11 +124,11 @@ app.post("/api/tweets", authenticateToken, async (req, res) => {
     }
 });
 
-// Create a new user with secure password hashing
+// Tworzymy nowego użytkownika z bezpiecznym hashowaniem hasła
 app.post("/api/users", async (req, res) => {
     const { email, username, password } = req.body;
 
-    // Validate all fields
+    // Sprawdzamy wszystkie pola
     const emailError = validateEmail(email);
     if (emailError) return res.status(400).json({ error: emailError });
 
@@ -166,7 +142,7 @@ app.post("/api/users", async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // Generate key pair
+        // Generujemy klucz publiczny i prywatny
         const { publicKey, privateKey } = generateKeyPair();
         const encryptedPrivateKey = encryptPrivateKey(privateKey, password);
 
@@ -197,67 +173,29 @@ app.post("/api/users", async (req, res) => {
     }
 });
 
-// Generate 2FA secret and QR code
+// Generujemy 2fa secret i qr code
 app.post("/api/2fa/generate", authenticateToken, async (req, res) => {
     try {
-        // Get user email for the QR code label
         const user = await prisma.user.findUnique({
             where: { id: req.userId },
             select: { email: true }
         });
 
-        console.log(user.email);
-
-        const secret = speakeasy.generateSecret({
-            name: `MiniTwitter:${user.email}` // Now we have the email
-        });
-
-        // Store the secret temporarily
-        await prisma.user.update({
-            where: { id: req.userId },
-            data: { 
-                twoFactorSecret: secret.base32,
-                twoFactorEnabled: false
-            }
-        });
-
-        // Generate QR code
-        const qrCode = await QRCode.toDataURL(secret.otpauth_url);
-
-        res.json({
-            secret: secret.base32,
-            qrCode
-        });
+        const twoFactorData = await generateTwoFactorSecret(req.userId, user.email);
+        res.json(twoFactorData);
     } catch (error) {
         console.error('Error generating 2FA:', error);
         res.status(500).json({ error: 'Failed to generate 2FA' });
     }
 });
 
-// Verify and enable 2FA
+// Sprawdzamy i włączamy 2fa
 app.post("/api/2fa/verify", authenticateToken, async (req, res) => {
     const { token } = req.body;
 
     try {
-        const user = await prisma.user.findUnique({
-            where: { id: req.userId }
-        });
-
-        console.log(user.twoFactorSecret);
-
-        const verified = speakeasy.totp.verify({
-            secret: user.twoFactorSecret,
-            encoding: 'base32',
-            token
-        });
-
-        console.log(verified);
-
+        const verified = await verifyTwoFactorToken(req.userId, token);
         if (verified) {
-            await prisma.user.update({
-                where: { id: req.userId },
-                data: { twoFactorEnabled: true }
-            });
             res.json({ success: true });
         } else {
             res.status(400).json({ error: 'Invalid token' });
@@ -268,12 +206,12 @@ app.post("/api/2fa/verify", authenticateToken, async (req, res) => {
     }
 });
 
-// Add helper function for random delay
+// Dodajemy pomocniczą funkcję do losowego opóźnienia (rndom delay)
 const getRandomDelay = () => {
-  return Math.floor(Math.random() * 1000) + 500; // Random delay between 500-1500ms
+  return Math.floor(Math.random() * 1000) + 500; // Losowe opóźnienie między 500-1500ms
 };
 
-// Modify login endpoint to handle attempts
+// endpoint logowania z obsługą prób logowania
 app.post("/api/login", async (req, res) => {
     const { email, password, totpToken } = req.body;
     console.log('Login attempt:', { email, hasPassword: !!password, totpToken });
@@ -291,12 +229,12 @@ app.post("/api/login", async (req, res) => {
         });
 
         if (!user) {
-            // Add random delay even for non-existent users
+            // Dodajemy losowe opóźnienie nawet dla nieistniejących użytkowników
             await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Check if user is locked out
+        // Sprawdzamy, czy użytkownik jest zablokowany
         if (user.loginAttempts >= 10) {
             const lockoutTime = 15 * 60 * 1000; // 15 minutes
             if (user.lastAttempt && Date.now() - user.lastAttempt.getTime() < lockoutTime) {
@@ -305,7 +243,7 @@ app.post("/api/login", async (req, res) => {
                     error: `Too many failed attempts. Please try again in ${remainingTime} minutes.` 
                 });
             } else {
-                // Reset attempts after lockout period
+                // Resetujemy próby po okresie blokady
                 await prisma.user.update({
                     where: { id: user.id },
                     data: { 
@@ -316,12 +254,12 @@ app.post("/api/login", async (req, res) => {
             }
         }
 
-        // Add random delay before password check
+        // Dodajemy losowe opóźnienie przed sprawdzeniem hasła
         await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
 
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) {
-            // Increment failed attempts
+            // Zwiększamy liczbę prób
             await prisma.user.update({
                 where: { id: user.id },
                 data: { 
@@ -334,7 +272,7 @@ app.post("/api/login", async (req, res) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Check 2FA if enabled
+        // Sprawdzamy 2fa jeśli jest włączone
         if (user.twoFactorEnabled) {
             if (!totpToken) {
                 return res.status(403).json({ 
@@ -342,16 +280,11 @@ app.post("/api/login", async (req, res) => {
                     message: 'Please provide 2FA token' 
                 });
             }
-
-            const verified = speakeasy.totp.verify({
-                secret: user.twoFactorSecret,
-                encoding: 'base32',
-                token: totpToken,
-                window: 1
-            });
+            // Sprawdzamy 2fa
+            const verified = verifyTwoFactorLogin(user.twoFactorSecret, totpToken);
 
             if (!verified) {
-                // Increment failed attempts for invalid 2FA too
+                // Zwiększamy liczbę prób dla nieprawidłowego 2fa
                 await prisma.user.update({
                     where: { id: user.id },
                     data: { 
@@ -365,7 +298,7 @@ app.post("/api/login", async (req, res) => {
             }
         }
 
-        // Reset attempts on successful login
+        // Resetujemy próby po pomyślnym logowaniu
         await prisma.user.update({
             where: { id: user.id },
             data: { 
@@ -374,7 +307,7 @@ app.post("/api/login", async (req, res) => {
             }
         });
 
-        // Generate JWT and send response
+        // Generujemy JWT i wysyłamy odpowiedź
         const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '1h' });
         const { password: _, twoFactorSecret: __, ...userData } = user;
         res.json({ user: userData, token });
@@ -384,7 +317,7 @@ app.post("/api/login", async (req, res) => {
     }
 });
 
-// Get user by id
+// Pobieramy użytkownika po id
 app.get("/api/users/:id", authenticateToken, async (req, res) => {
     const { id } = req.params;
     
@@ -412,7 +345,7 @@ app.get("/api/users/:id", authenticateToken, async (req, res) => {
     }
 });
 
-// Add endpoint to verify token and return user data
+// endpoint do sprawdzania tokenu i zwracania danych użytkownika
 app.get("/api/verify-token", authenticateToken, async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
@@ -436,7 +369,7 @@ app.get("/api/verify-token", authenticateToken, async (req, res) => {
     }
 });
 
-// Initiate password reset
+// inicjujemy reset hasła
 app.post("/api/reset-password/request", async (req, res) => {
     const { email } = req.body;
     
@@ -446,11 +379,11 @@ app.post("/api/reset-password/request", async (req, res) => {
         });
 
         if (!user || !user.twoFactorEnabled) {
-            // Don't reveal if user exists or has 2FA
+            // Nie ujawniamy   czy użytkownik istnieje lub ma 2fa
             return res.json({ message: 'the account didnt have 2FA enabled, you will not be able to reset the password.' });
         }
 
-        // Mark that user requested reset
+        // oznaczamy że użytkownik zażądał resetu
         await prisma.user.update({
             where: { id: user.id },
             data: { resetRequested: new Date() }
@@ -463,7 +396,7 @@ app.post("/api/reset-password/request", async (req, res) => {
     }
 });
 
-// Verify 2FA and reset password
+// sprawdzamy 2fa i resetujemy hasło
 app.post("/api/reset-password/verify", async (req, res) => {
     const { email, totpToken, newPassword } = req.body;
 
@@ -476,7 +409,7 @@ app.post("/api/reset-password/verify", async (req, res) => {
             return res.status(400).json({ error: 'Invalid reset request' });
         }
 
-        // Verify 2FA token
+        // Sprawdzamy token 2fa
         const verified = speakeasy.totp.verify({
             secret: user.twoFactorSecret,
             encoding: 'base32',
@@ -488,7 +421,7 @@ app.post("/api/reset-password/verify", async (req, res) => {
             return res.status(401).json({ error: 'Invalid 2FA token' });
         }
 
-        // Reset password
+        // Resetujemy hasło
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
@@ -511,7 +444,7 @@ app.listen(8080, () => {
     console.log("Server started on port 8080");
 });
 
-// Cleanup Prisma connection on server shutdown
+// czyszczymy połączenie z Prisma przy zamknięciu serwera
 process.on('beforeExit', async () => {
     await prisma.$disconnect();
 });

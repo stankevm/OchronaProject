@@ -2,23 +2,23 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
+# kopiujemy package.json
 COPY package*.json ./
 
-# Install dependencies
+# instalujemy zależności
 RUN npm install
 
-# Copy rest of the application
+# kopiujemy resztę aplikacji
 COPY . .
 
-# Build the application
+# budujemy aplikację
 RUN npm run build
 
-# Install serve to run the built application
+# instalujemy serve do uruchomienia aplikacji
 RUN npm install -g serve
 
-# Expose port
+# eksponujemy port
 EXPOSE 5173
 
-# Start the application
+# uruchamiamy aplikację
 CMD ["npm", "run", "dev", "--", "--host"]
